@@ -24,6 +24,11 @@ sub FroniusSymJSON_UpdateAborted($);
 
 my $MODUL = "FroniusSymJSON";
 
+my $unit_current = "W";
+my $unit_day = "Wh";
+my $unit_year = "Wh";
+my $unit_total = "Wh";
+
 # FHEM Modulfunktionen
 
 sub ##########################################
@@ -50,7 +55,9 @@ sub FroniusSymJSON_Initialize($) {
     $hash->{UndefFn}  = $TYPE . "_Undefine";
     $hash->{SetFn}    = $TYPE . "_Set";
     $hash->{GetFn}    = $TYPE . "_Get";
-#    $hash->{NotifyFn} = $TYPE . "_Notify";
+    $hash->{NotifyFn} = $TYPE . "_Notify";
+
+    $hash->{NOTIFYDEV} = "global";
 
     $hash->{DbLog_splitFn}= $TYPE . "_DbLog_splitFn";
 #    $hash->{AttrFn}       = $TYPE . "_Attr";
@@ -114,6 +121,10 @@ sub FroniusSymJSON_Define($$) {
   #Get API Version after ten seconds. API Version is important as it also contains the Basis URL
   #for the API Calls.
   InternalTimer(gettimeofday() + 10, "FroniusSymJSON_getAPIVersion", $hash, 0);
+
+  #
+  # Init global variables for units from attr
+  # InternalTimer(gettimeofday() + 10, "FroniusSymJSON_InitUnits", $hash, 0);
 
   #Reset temporary values
   $hash->{fhem}{jsonInterpreter} = "";
@@ -180,7 +191,7 @@ sub FroniusSymJSON_getInterval($) {
 	return $interval;
 }
 
-sub FroniusSymJSON_convertData($$$$) {
+sub FroniusSymJSON_ConvertData($$$$) {
         my ($hash, $data, $sourceunit, $targetunit) = @_;
 
         my $rv;
@@ -364,21 +375,21 @@ sub FroniusSymJSON_ParseHttpResponse($)
 			# maybe I will make in configurable via attr
 			my $totalenergy = $json->{'Body'}->{'Data'}->{'TOTAL_ENERGY'}->{'Values'}->{$device_id};
 			my $totalunit = $json->{'Body'}->{'Data'}->{'TOTAL_ENERGY'}->{'Unit'};
-			$totalenergy = FroniusSymJSON_convertData($hash, $totalenergy, $totalunit, $attr{$name}{unit_total});
+			$totalenergy = FroniusSymJSON_ConvertData($hash, $totalenergy, $totalunit, $unit_total);
 
 			# I prefer to see the yearly amount in kWh
 			# maybe I will make in configurable via attr
 			my $yearenergy = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Values'}->{$device_id};
 			my $yearunit = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Unit'};
-			$yearenergy = FroniusSymJSON_convertData($hash, $yearenergy, $yearunit, $attr{$name}{unit_year});
+			$yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_year);
 
 			my $dayenergy = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Values'}->{$device_id};
 			my $dayunit = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Unit'};
-			$dayenergy = FroniusSymJSON_convertData($hash, $dayenergy, $dayunit, $attr{$name}{unit_day});
+			$dayenergy = FroniusSymJSON_ConvertData($hash, $dayenergy, $dayunit, $unit_day);
 
 			my $currentenergy = $json->{'Body'}->{'Data'}->{'PAC'}->{'Values'}->{$device_id};
 			my $currentunit = $json->{'Body'}->{'Data'}->{'PAC'}->{'Unit'};
-			$currentenergy = FroniusSymJSON_convertData($hash, $currentenergy, $currentunit, $attr{$name}{unit_current});
+			$currentenergy = FroniusSymJSON_ConvertData($hash, $currentenergy, $currentunit, $unit_current);
 			
 			$totalenergy_sum = $totalenergy_sum + $totalenergy;
 			$yearenergy_sum = $yearenergy_sum + $yearenergy;
@@ -437,10 +448,10 @@ sub FroniusSymJSON_DbLog_splitFn($) {
   $value = $parts[1];
   
   $unit = "";
-#  $unit = $attr{$name}{unit_day} if($reading =~ /ENERGY_DAY.*/);;
-#  $unit = $attr{$name}{unit_current} if($reading =~ /ENERGY_CURRENT.*/);;
-#  $unit = $attr{$name}{unit_total} if($reading =~ /ENERGY_TOTAL.*/);;
-#  $unit = $attr{$name}{unit_year} if($reading =~ /ENERGY_YEAR.*/);  
+  $unit = $unit_day if($reading =~ /ENERGY_DAY.*/);;
+  $unit = $unit_current if($reading =~ /ENERGY_CURRENT.*/);;
+  $unit = $unit_total if($reading =~ /ENERGY_TOTAL.*/);;
+  $unit = $unit_year if($reading =~ /ENERGY_YEAR.*/);  
 
   Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading: $value $unit" if(defined($value));
   Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading" if(!defined($value));
@@ -466,7 +477,60 @@ sub FroniusSymJSON_Undefine($$) {
 } # end FroniusSymJSON_Undefine
 
 
-sub FroniusSymJSON_Notify() {
+sub FroniusSymJSON_Notify($$)
+{
+	my ($own_hash, $dev_hash) = @_;
+	my $ownName = $own_hash->{NAME}; # own name / hash
+
+	FroniusSymJSON_Log $own_hash, 1, "Getting notify $ownName / $dev_hash->{NAME}";
+ 
+	return "" if(IsDisabled($ownName)); # Return without any further action if the module is disabled
+ 
+	my $devName = $dev_hash->{NAME}; # Device that created the events
+	my $events = deviceEvents($dev_hash, 1);
+
+	if($devName eq "global" && grep(m/^INITIALIZED|REREADCFG$/, @{$events}))
+	{
+		 FroniusSymJSON_InitUnits($own_hash);
+	}
+}
+
+sub FroniusSymJSON_InitUnits($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+
+	FroniusSymJSON_Log $hash, 1, "Initialising global units for $name";
+	
+	if ($init_done) {
+		if (defined $attr{$name}{unit_day}) {
+			$unit_day = $attr{$name}{unit_day};
+		} else {
+			$unit_day = "Wh";
+			FroniusSymJSON_Log $hash, 1, "attr unit_day not set, using default";
+		}
+		if (defined $attr{$name}{unit_current}) {
+			$unit_current = $attr{$name}{unit_current};
+		} else {
+			$unit_current = "W";
+			FroniusSymJSON_Log $hash, 1, "attr unit_current not set, using default";
+		}
+		if (defined $attr{$name}{unit_total}) {
+			$unit_total = $attr{$name}{unit_total};
+		} else {
+			$unit_total = "Wh";
+			FroniusSymJSON_Log $hash, 1, "attr unit_total not set, using default";
+		}
+		if (defined $attr{$name}{unit_year}) {
+			$unit_year =  $attr{$name}{unit_year};
+		} else {
+			$unit_year =  "Wh";
+			FroniusSymJSON_Log $hash, 1, "attr unit_year not set, using default";
+		}
+		FroniusSymJSON_Log $hash, 1, "Global units initialised for $name";
+	} else {
+		FroniusSymJSON_Log $hash, 1, "Fhem not ready yet, retry in 5 seconds";
+	  	InternalTimer(gettimeofday() + 5, "FroniusSymJSON_InitUnits", $hash, 0);
+	}
 }
 
 sub ##########################################
