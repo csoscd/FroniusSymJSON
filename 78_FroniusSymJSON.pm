@@ -63,24 +63,6 @@ sub FroniusSymJSON_Initialize($) {
 #    $hash->{AttrFn}       = $TYPE . "_Attr";
 
 
-# $hash->{READINGS}{DAY_ENERGY}{VAL};
-# $hash->{READINGS}{DAY_ENERGY}{TIME};
-
-#    . ".DAY_ENERGY "
-#    . ".PAC "
-#    . ".TOTAL_ENERGY "
-#    . ".YEAR_ENERGY "
-#    . ".DAY_PMAX "
-#    . ".DAY_UACMAX "
-#    . ".DAY_UDCMAX "
-#    . ".TOTAL_PMAX "
-#    . ".TOTAL_UACMAX "
-#    . ".TOTAL_UDCMAX "
-#    . ".YEAR_PMAX "
-#    . ".YEAR_UACMAX "
-#    . ".YEAR_UDCMAX "
-
-
  $hash->{AttrList} = ""
     . "device_ids "
     . "disable:1,0 "
@@ -119,8 +101,8 @@ sub FroniusSymJSON_Define($$) {
   #Clear Everything, remove all timers for this module
   RemoveInternalTimer($hash);
   
-  #Get API Version after ten seconds. API Version is important as it also contains the Basis URL
-  #for the API Calls.
+  # Get API Version after ten seconds. API Version is important as it also contains the Basis URL
+  # for the API Calls.
   InternalTimer(gettimeofday() + 10, "FroniusSymJSON_getAPIVersion", $hash, 0);
 
   #
@@ -128,9 +110,9 @@ sub FroniusSymJSON_Define($$) {
   # InternalTimer(gettimeofday() + 10, "FroniusSymJSON_InitUnits", $hash, 0);
 
   #Reset temporary values
-  $hash->{fhem}{jsonInterpreter} = "";
+  #$hash->{fhem}{jsonInterpreter} = "";
 
-  $hash->{fhem}{modulVersion} = '$Date: 2018-03-22 20:40:00 +0100 (Thu, 22 Mar 2018) $';
+  $hash->{fhem}{modulVersion} = '$Date: 2018-03-28 08:45:00 +0100 (Thu, 28 Mar 2018) $';
  
   return undef;
 } #end FroniusSymJSON_Define
@@ -192,6 +174,10 @@ sub FroniusSymJSON_getInterval($) {
 	return $interval;
 }
 
+#
+# Convert from one possible unit to another. Maybe not the most graceful way
+# however, it works :-)
+#
 sub FroniusSymJSON_ConvertData($$$$) {
         my ($hash, $data, $sourceunit, $targetunit) = @_;
 
@@ -257,6 +243,10 @@ sub FroniusSymJSON_ConvertData($$$$) {
 
 }
 
+#
+# Prepare the http request to the Fronius system to get
+# the Inverter Realtime Data
+#
 sub FroniusSymJSON_getInverterRealtimeData($) {
 
 	my ($hash) = @_;
@@ -281,6 +271,9 @@ sub FroniusSymJSON_getInverterRealtimeData($) {
 	}
 }
 
+#
+# Perform the http request as a non-blocking request
+#
 sub FroniusSymJSON_PerformHttpRequest($$)
 {
     my ($hash, $url, $callname) = @_;
@@ -310,18 +303,18 @@ sub FroniusSymJSON_ParseHttpResponse($)
     if($err ne "")                                                                                                      # wenn ein Fehler bei der HTTP Abfrage aufgetreten ist
     {
         FroniusSymJSON_Log($hash, 1, "error while requesting ".$param->{url}." - $err");                                            # Eintrag fürs Log
-        # readingsSingleUpdate($hash, "fullResponse", "ERROR", 0);                                                        # Readings erzeugen
 	if ($param->{call} eq "API") {
 	  #
-	  # if API Call already failed, try again in 60 seconds
+	  # if API Call failed, try again in 60 seconds
 	  #
 	  InternalTimer(gettimeofday() + 60, "FroniusSymJSON_getAPIVersion", $hash, 0);
     	  $hash->{STATE}    = "Connection error getting API info";
+          FroniusSymJSON_Log($hash, 1, "API call to DataLogger failed");                                                         # Eintrag fürs Log
 	} elsif ($param->{call} eq "GetInverterRealtimeData") {
     	  $hash->{STATE}    = "Connection error getting DATA";
+          FroniusSymJSON_Log($hash, 1, "Data call to DataLogger failed");                                                         # Eintrag fürs Log
 	}
     }
-
     elsif($data ne "")                                                                                                  # wenn die Abfrage erfolgreich war ($data enthält die Ergebnisdaten des HTTP Aufrufes)
     {
         FroniusSymJSON_Log($hash, 5, "url ".$param->{url}." returned: $data");                                                         # Eintrag fürs Log
