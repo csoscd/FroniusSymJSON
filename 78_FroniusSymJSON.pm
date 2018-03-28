@@ -91,6 +91,7 @@ sub FroniusSymJSON_Initialize($) {
     . "unit_day:Wh,kWh,MWh,GWh "
     . "unit_current:W,kW,MW,GW "
     . "listdevices:1,0 "
+    . "avoidDailyBug:1,0 "
     . $readingFnAttributes
   ;
 } # end FroniusSymJSON_Initialize
