@@ -115,7 +115,7 @@ sub FroniusSymJSON_Define($$) {
     $hash->{APIURL}   = "http://".$host."/solar_api/GetAPIVersion.cgi";
     $hash->{helper}{INTERVAL} = $interval;
     $hash->{MODEL}    = $type;
-
+    
   #Clear Everything, remove all timers for this module
   RemoveInternalTimer($hash);
   
@@ -326,6 +326,11 @@ sub FroniusSymJSON_ParseHttpResponse($)
     {
         FroniusSymJSON_Log($hash, 5, "url ".$param->{url}." returned: $data");                                                         # Eintrag fürs Log
 
+	my $avoidDailyBug = 0;
+	if (defined $attr{$name}{avoidDailyBug}) {
+		$avoidDailyBug = $attr{$name}{avoidDailyBug};
+	}
+
 	if ($param->{call} eq "API") {
 
 	        FroniusSymJSON_Log($hash, 5, "API was checked");                                                         # Eintrag fürs Log
@@ -371,22 +376,29 @@ sub FroniusSymJSON_ParseHttpResponse($)
 		foreach my $device_id ( @devices ) {
 			
 			FroniusSymJSON_Log($hash, 5, "DeviceID: $device_id"); 
-		
-			# I prefer to see the total amount in kWh
-			# maybe I will make in configurable via attr
+
+			#
+			# Important to read this as first value to be able to consider the avoidDailyBug setting
+			#
+			my $dayenergy = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Values'}->{$device_id};
+			my $dayunit = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Unit'};
+			$dayenergy = FroniusSymJSON_ConvertData($hash, $dayenergy, $dayunit, $unit_day);
+
 			my $totalenergy = $json->{'Body'}->{'Data'}->{'TOTAL_ENERGY'}->{'Values'}->{$device_id};
 			my $totalunit = $json->{'Body'}->{'Data'}->{'TOTAL_ENERGY'}->{'Unit'};
 			$totalenergy = FroniusSymJSON_ConvertData($hash, $totalenergy, $totalunit, $unit_total);
 
-			# I prefer to see the yearly amount in kWh
-			# maybe I will make in configurable via attr
 			my $yearenergy = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Values'}->{$device_id};
 			my $yearunit = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Unit'};
+			if ($avoidDailyBug == 1) {
+				# First it is required to convert the year value into the same unit as the day unit
+				my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_day);
+				# TODO
+				# now read the last value of year energy
+				# convert also into unit_day
+				# build the difference between both values and take as dayenergy
+			}
 			$yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_year);
-
-			my $dayenergy = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Values'}->{$device_id};
-			my $dayunit = $json->{'Body'}->{'Data'}->{'DAY_ENERGY'}->{'Unit'};
-			$dayenergy = FroniusSymJSON_ConvertData($hash, $dayenergy, $dayunit, $unit_day);
 
 			my $currentenergy = $json->{'Body'}->{'Data'}->{'PAC'}->{'Values'}->{$device_id};
 			my $currentunit = $json->{'Body'}->{'Data'}->{'PAC'}->{'Unit'};
