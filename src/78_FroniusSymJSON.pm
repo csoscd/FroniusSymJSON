@@ -180,6 +180,9 @@ sub FroniusSymJSON_getInterval($) {
 #
 sub FroniusSymJSON_ConvertData($$$$) {
         my ($hash, $data, $sourceunit, $targetunit) = @_;
+	my $name = $hash->{NAME};
+
+	FroniusSymJSON_Log($hash, 5, "$name: Getting ConvertData for $data with source unit $sourceunit into targetunit $targetunit");
 
         my $rv;
         my @cv;
@@ -237,6 +240,8 @@ sub FroniusSymJSON_ConvertData($$$$) {
                 }
                 $i++;
         }
+
+	FroniusSymJSON_Log($hash, 5, "$name: Getting ConvertData finished, new data $data with source unit $sourceunit into targetunit $targetunit");
 
         $rv = $data;
         return $rv;
@@ -388,29 +393,6 @@ sub FroniusSymJSON_ParseHttpResponse($)
 			my $yearunit = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Unit'};
 			$yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_year);
 
-			# There is a bug in DAY_ENERGY. DAY_ENERGY stopps counting even though YEAR_ENERGY and TOTAL_ENERGY
-			# are counted correctly - or at least counting is continued for them ;-)
-			# It is possible to use an attribute to define that the DAY_ENERGY should not be taken from the
-			# JSON response. Instead it will be calculated based on the YEAR_ENERGY.
-			if ($avoidDailyBug == 1) {
-				# First it is required to convert the year value into the same unit as the day unit.
-				# Here the configured unit is the base because the $yearenergy has already been converted
-				# to the $unit_year unit.
-				my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
-				# Read the current value from the stored reading
-				my $last_yearenergy = ReadingsVal($name, "ENERGY_YEAR_".$device_id, 0);
-				# convert it into the unit used for $unit_day.
-				# IN CASE the unit has been changed in fhem since between two updated, this will lead to an
-				# incorrect value!
-				$last_yearenergy = FroniusSymJSON_ConvertData($hash, $last_yearenergy, $unit_year, $unit_day);
-				
-				# $tmp_dayenergy is only required to make a log entry...
-				my $tmp_dayenergy = $dayenergy;
-				
-				$dayenergy = $tmp_yearenergy - $last_yearenergy;
-				FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $tmp_dayenergy");
-			}
-
 			my $currentenergy = $json->{'Body'}->{'Data'}->{'PAC'}->{'Values'}->{$device_id};
 			my $currentunit = $json->{'Body'}->{'Data'}->{'PAC'}->{'Unit'};
 			$currentenergy = FroniusSymJSON_ConvertData($hash, $currentenergy, $currentunit, $unit_current);
@@ -429,6 +411,34 @@ sub FroniusSymJSON_ParseHttpResponse($)
 			# it can be turned of to log each single device. This makes especially sense if
 			# only one device exists
 			if (FroniusSymJSON_listDevices($hash) eq "1") {
+				
+				# For the devices the method is only necessary if the data for the devices
+				# should be stored
+				
+				# There is a bug in DAY_ENERGY. DAY_ENERGY stopps counting even though YEAR_ENERGY and TOTAL_ENERGY
+				# are counted correctly - or at least counting is continued for them ;-)
+				# It is possible to use an attribute to define that the DAY_ENERGY should not be taken from the
+				# JSON response. Instead it will be calculated based on the YEAR_ENERGY.
+				if ($avoidDailyBug == 1) {
+					# First it is required to convert the year value into the same unit as the day unit.
+					# Here the configured unit is the base because the $yearenergy has already been converted
+					# to the $unit_year unit.
+					my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
+					# Read the current value from the stored reading
+					my $last_yearenergy = ReadingsVal($name, "ENERGY_YEAR_".$device_id, 0);
+					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Received $last_yearenergy from reading");
+					# convert it into the unit used for $unit_day.
+					# IN CASE the unit has been changed in fhem since between two updated, this will lead to an
+					# incorrect value!
+					$last_yearenergy = FroniusSymJSON_ConvertData($hash, $last_yearenergy, $unit_year, $unit_day);
+
+					# $tmp_dayenergy is only required to make a log entry...
+					my $tmp_dayenergy = $dayenergy;
+
+					$dayenergy = $tmp_yearenergy - $last_yearenergy;
+					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $tmp_dayenergy");
+				}
+
 				readingsBeginUpdate($hash);
 				$rv = readingsBulkUpdate($hash, "ENERGY_DAY_".$device_id, $dayenergy);
 				$rv = readingsBulkUpdate($hash, "ENERGY_CURRENT_".$device_id, $currentenergy);
@@ -437,6 +447,34 @@ sub FroniusSymJSON_ParseHttpResponse($)
 				readingsEndUpdate($hash, 1);
 			}
 		}
+
+		if ($avoidDailyBug == 1) {
+			my $tmp_day_begin = ReadingsVal($name, "YEAR_SUM_TODAY_START", "0:unknown");
+			my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+
+			my $tmp_year_begin_sum;
+			my @begin_info = split /:/, $tmp_day_begin;
+
+			if ($begin_info[1] eq $wday) {
+				$tmp_year_begin_sum = $begin_info[0];
+			} else {
+				$tmp_year_begin_sum = FroniusSymJSON_ConvertData($hash, $yearenergy_sum, $unit_year, $unit_day);
+				readingsSingleUpdate($hash, "YEAR_SUM_TODAY_START", $tmp_year_begin_sum.":".$wday, undef);
+			}
+			
+			# First it is required to convert the year value into the same unit as the day unit.
+			# Here the configured unit is the base because the $yearenergy has already been converted
+			# to the $unit_year unit.
+			my $tmp_yearenergy_sum = FroniusSymJSON_ConvertData($hash, $yearenergy_sum, $unit_year, $unit_day);
+			FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Current yearenergy value is $tmp_yearenergy_sum $unit_day");
+
+			# $tmp_dayenergy is only required to make a log entry...
+			my $tmp_dayenergy_sum = $dayenergy_sum;
+
+			$dayenergy_sum = $tmp_yearenergy_sum - $tmp_year_begin_sum;
+			FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy_sum instead of read value of $tmp_dayenergy_sum");
+		}
+
 
 		readingsBeginUpdate($hash);
 		$rv = readingsBulkUpdate($hash, "ENERGY_DAY_SUM", $dayenergy_sum);
