@@ -544,7 +544,7 @@ sub FroniusSymJSON_Notify($$)
 	my ($own_hash, $dev_hash) = @_;
 	my $ownName = $own_hash->{NAME}; # own name / hash
 
-	FroniusSymJSON_Log $own_hash, 1, "Getting notify $ownName / $dev_hash->{NAME}";
+	FroniusSymJSON_Log $own_hash, 5, "Getting notify $ownName / $dev_hash->{NAME}";
  
 	return "" if(IsDisabled($ownName)); # Return without any further action if the module is disabled
  
