@@ -366,6 +366,9 @@ sub FroniusSymJSON_ParseHttpResponse($)
 		my $rv = 0;
 		
 		my @devices = split /:/, $device_ids;
+		#
+		# Iterate through all defined device IDs
+		#
 		foreach my $device_id ( @devices ) {
 			
 			FroniusSymJSON_Log($hash, 5, "DeviceID: $device_id"); 
@@ -383,15 +386,30 @@ sub FroniusSymJSON_ParseHttpResponse($)
 
 			my $yearenergy = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Values'}->{$device_id};
 			my $yearunit = $json->{'Body'}->{'Data'}->{'YEAR_ENERGY'}->{'Unit'};
-			if ($avoidDailyBug == 1) {
-				# First it is required to convert the year value into the same unit as the day unit
-				my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_day);
-				# TODO
-				# now read the last value of year energy
-				# convert also into unit_day
-				# build the difference between both values and take as dayenergy
-			}
 			$yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $yearunit, $unit_year);
+
+			# There is a bug in DAY_ENERGY. DAY_ENERGY stopps counting even though YEAR_ENERGY and TOTAL_ENERGY
+			# are counted correctly - or at least counting is continued for them ;-)
+			# It is possible to use an attribute to define that the DAY_ENERGY should not be taken from the
+			# JSON response. Instead it will be calculated based on the YEAR_ENERGY.
+			if ($avoidDailyBug == 1) {
+				# First it is required to convert the year value into the same unit as the day unit.
+				# Here the configured unit is the base because the $yearenergy has already been converted
+				# to the $unit_year unit.
+				my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
+				# Read the current value from the stored reading
+				my $last_yearenergy = ReadingsVal($name, "ENERGY_YEAR_".$device_id, 0);
+				# convert it into the unit used for $unit_day.
+				# IN CASE the unit has been changed in fhem since between two updated, this will lead to an
+				# incorrect value!
+				$last_yearenergy = FroniusSymJSON_ConvertData($hash, $last_yearenergy, $unit_year, $unit_day);
+				
+				# $tmp_dayenergy is only required to make a log entry...
+				my $tmp_dayenergy = $dayenergy;
+				
+				$dayenergy = $tmp_yearenergy - $last_yearenergy;
+				FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $tmp_dayenergy");
+			}
 
 			my $currentenergy = $json->{'Body'}->{'Data'}->{'PAC'}->{'Values'}->{$device_id};
 			my $currentunit = $json->{'Body'}->{'Data'}->{'PAC'}->{'Unit'};
