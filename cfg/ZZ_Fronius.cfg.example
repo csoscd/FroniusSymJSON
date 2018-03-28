@@ -1,0 +1,19 @@
+define Wechselrichter FroniusSymJSON 1.2.3.4
+attr Wechselrichter device_ids 1
+attr Wechselrichter interval 10
+attr Wechselrichter interval_night 30
+attr Wechselrichter unit_day kWh
+attr Wechselrichter unit_current W
+attr Wechselrichter unit_total MWh
+attr Wechselrichter unit_year GWh
+attr Wechselrichter group Photovoltaik
+attr Wechselrichter alias Wechselrichter Fronius
+attr Wechselrichter room 11.01 Technikraum
+attr Wechselrichter stateFormat {sprintf "Aktuelle Produktion:  %.1f W", ReadingsVal($name, "ENERGY_CURRENT_SUM", 0)}
+attr Wechselrichter listdevices 0
+
+define SVG_Energy SVG myDbLog:SVG_Energy:HISTORY
+attr SVG_Energy alias Stromerzeugung
+#attr SVG_Energy group Photovoltaik
+attr SVG_Energy plotsize 800,200
+attr SVG_Energy room 11.01 Technikraum
