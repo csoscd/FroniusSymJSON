@@ -19,22 +19,37 @@ compare the calculated and the inverter value.
 ### device_ids
 Possible values: colon seperated list of device IDs
 
-Example: attr Wechselrichter device_ids 1:2
+Example:
+
+attr Wechselrichter device_ids 1:2
 
 According to my information device IDs are just counted (0 1 2).
 
 ### interval
+Possible values: Integer
 
+Time in seconds between two pull requests to the Inverter.
 
 ### interval_night
+Possible values: Integer
 
+Time in seconds between two pull requests to the Inverter during the night. The FHEM function is_day() is used to check. If the attribute is not
+set, the same time will be used 24hours a day.
 
 ### listdevices
+Possible values: 0|1
+
+If set to 1 all devices will have their own readings. Otherwise only the total values will be stored.
 
 ### unit_current
+Possible values: W|kW|MW|GW
+
 
 ### unit_day
+Possible values: Wh|kWh|MWh|GWh
 
 ### unit_total
+Possible values: Wh|kWh|MWh|GWh
 
 ### unit_year
+Possible values: Wh|kWh|MWh|GWh
