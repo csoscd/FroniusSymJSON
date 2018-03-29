@@ -515,8 +515,8 @@ sub FroniusSymJSON_DbLog_splitFn($) {
   $unit = $unit_total if($reading =~ /ENERGY_TOTAL.*/);;
   $unit = $unit_year if($reading =~ /ENERGY_YEAR.*/);  
 
-  Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading: $value $unit" if(defined($value));
-  Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading" if(!defined($value));
+  Log3 "dbsplit", 5, "FroniusSymJSON dbsplit: ".$event."  $reading: $value $unit" if(defined($value));
+  Log3 "dbsplit", 5, "FroniusSymJSON dbsplit: ".$event."  $reading" if(!defined($value));
 
   return ($reading, $value, $unit);
 }
