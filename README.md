@@ -10,6 +10,31 @@ In some firmware versions there seems to be a bug in the DAY_ENERGY value. The c
 seems to be correct. Therefore if avoidDailyBug is set to 1 the following will happen:
 At the first connection to the Inverter during the day (which usually should be somewhere after midnight) the current value of yearly value
 will be stored in a reading YEAR_SUM_TODAY_START. Everytime now the energy info is pulled from the Inverter:
+
 day value = current yearly value - YEAR_SUM_TODAY_START
+
 will be calculated. Additionally, the value read from the inverter will be stored in a reading ENERGY_DAY_READ_SUM. This allows you to
 compare the calculated and the inverter value.
+
+### device_ids
+Possible values: colon seperated list of device IDs
+
+Example: attr Wechselrichter device_ids 1:2
+
+According to my information device IDs are just counted (0 1 2).
+
+### interval
+
+
+### interval_night
+
+
+### listdevices
+
+### unit_current
+
+### unit_day
+
+### unit_total
+
+### unit_year
