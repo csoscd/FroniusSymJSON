@@ -448,6 +448,8 @@ sub FroniusSymJSON_ParseHttpResponse($)
 			}
 		}
 
+		my $energy_day_read_sum = $dayenergy_sum;
+
 		if ($avoidDailyBug == 1) {
 			my $tmp_day_begin = ReadingsVal($name, "YEAR_SUM_TODAY_START", "0:unknown");
 			my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
@@ -468,15 +470,15 @@ sub FroniusSymJSON_ParseHttpResponse($)
 			my $tmp_yearenergy_sum = FroniusSymJSON_ConvertData($hash, $yearenergy_sum, $unit_year, $unit_day);
 			FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Current yearenergy value is $tmp_yearenergy_sum $unit_day");
 
-			# $tmp_dayenergy is only required to make a log entry...
-			my $tmp_dayenergy_sum = $dayenergy_sum;
-
 			$dayenergy_sum = $tmp_yearenergy_sum - $tmp_year_begin_sum;
-			FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy_sum instead of read value of $tmp_dayenergy_sum");
+			FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy_sum instead of read value of $energy_day_read_sum");
 		}
 
 
 		readingsBeginUpdate($hash);
+		if ($avoidDailyBug == 1) {
+			$rv = readingsBulkUpdate($hash, "ENERGY_DAY_READ_SUM", $energy_day_read_sum);
+		}
 		$rv = readingsBulkUpdate($hash, "ENERGY_DAY_SUM", $dayenergy_sum);
 		$rv = readingsBulkUpdate($hash, "ENERGY_CURRENT_SUM", $currentenergy_sum);
 		$rv = readingsBulkUpdate($hash, "ENERGY_TOTAL_SUM", $totalenergy_sum);
@@ -515,8 +517,8 @@ sub FroniusSymJSON_DbLog_splitFn($) {
   $unit = $unit_total if($reading =~ /ENERGY_TOTAL.*/);;
   $unit = $unit_year if($reading =~ /ENERGY_YEAR.*/);  
 
-  Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading: $value $unit" if(defined($value));
-  Log3 "dbsplit", 1, "FroniusSymJSON dbsplit: ".$event."  $reading" if(!defined($value));
+  Log3 "dbsplit", 5, "FroniusSymJSON dbsplit: ".$event."  $reading: $value $unit" if(defined($value));
+  Log3 "dbsplit", 5, "FroniusSymJSON dbsplit: ".$event."  $reading" if(!defined($value));
 
   return ($reading, $value, $unit);
 }
@@ -568,27 +570,27 @@ sub FroniusSymJSON_InitUnits($) {
 			$unit_day = $attr{$name}{unit_day};
 		} else {
 			$unit_day = "Wh";
-			FroniusSymJSON_Log $hash, 1, "attr unit_day not set, using default";
+			FroniusSymJSON_Log $hash, 5, "attr unit_day not set, using default";
 		}
 		if (defined $attr{$name}{unit_current}) {
 			$unit_current = $attr{$name}{unit_current};
 		} else {
 			$unit_current = "W";
-			FroniusSymJSON_Log $hash, 1, "attr unit_current not set, using default";
+			FroniusSymJSON_Log $hash, 5, "attr unit_current not set, using default";
 		}
 		if (defined $attr{$name}{unit_total}) {
 			$unit_total = $attr{$name}{unit_total};
 		} else {
 			$unit_total = "Wh";
-			FroniusSymJSON_Log $hash, 1, "attr unit_total not set, using default";
+			FroniusSymJSON_Log $hash, 5, "attr unit_total not set, using default";
 		}
 		if (defined $attr{$name}{unit_year}) {
 			$unit_year =  $attr{$name}{unit_year};
 		} else {
 			$unit_year =  "Wh";
-			FroniusSymJSON_Log $hash, 1, "attr unit_year not set, using default";
+			FroniusSymJSON_Log $hash, 5, "attr unit_year not set, using default";
 		}
-		FroniusSymJSON_Log $hash, 1, "Global units initialised for $name";
+		FroniusSymJSON_Log $hash, 5, "Global units initialised for $name";
 	} else {
 		FroniusSymJSON_Log $hash, 1, "Fhem not ready yet, retry in 5 seconds";
 	  	InternalTimer(gettimeofday() + 5, "FroniusSymJSON_InitUnits", $hash, 0);
