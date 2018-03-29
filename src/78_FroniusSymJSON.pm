@@ -74,6 +74,9 @@ sub FroniusSymJSON_Initialize($) {
     . "unit_current:W,kW,MW,GW "
     . "listdevices:1,0 "
     . "avoidDailyBug:1,0 "
+#    . "CommonInverterData:1,0 "
+#    . "MinMaxInverterData:1,0 "
+#    . ":1,0 "
     . $readingFnAttributes
   ;
 } # end FroniusSymJSON_Initialize
@@ -414,32 +417,42 @@ sub FroniusSymJSON_ParseHttpResponse($)
 				
 				# For the devices the method is only necessary if the data for the devices
 				# should be stored
+
+				my $energy_day_read_dev = $dayenergy;
 				
 				# There is a bug in DAY_ENERGY. DAY_ENERGY stopps counting even though YEAR_ENERGY and TOTAL_ENERGY
 				# are counted correctly - or at least counting is continued for them ;-)
 				# It is possible to use an attribute to define that the DAY_ENERGY should not be taken from the
 				# JSON response. Instead it will be calculated based on the YEAR_ENERGY.
 				if ($avoidDailyBug == 1) {
+				
+					my $year_today_start_dev = ReadingsVal($name, "YEAR_TODAY_START_".$device_id, "0:unknown");
+					my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+
+					my $tmp_year_begin_dev;
+					my @begin_info = split /:/, $year_today_start_dev;
+
+					if ($begin_info[1] eq $wday) {
+						$tmp_year_begin_dev = $begin_info[0];
+					} else {
+						$tmp_year_begin_dev = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
+						readingsSingleUpdate($hash, "YEAR_TODAY_START".$device_id, $tmp_year_begin_dev.":".$wday, undef);
+					}
+
 					# First it is required to convert the year value into the same unit as the day unit.
 					# Here the configured unit is the base because the $yearenergy has already been converted
 					# to the $unit_year unit.
-					my $tmp_yearenergy = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
-					# Read the current value from the stored reading
-					my $last_yearenergy = ReadingsVal($name, "ENERGY_YEAR_".$device_id, 0);
-					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Received $last_yearenergy from reading");
-					# convert it into the unit used for $unit_day.
-					# IN CASE the unit has been changed in fhem since between two updated, this will lead to an
-					# incorrect value!
-					$last_yearenergy = FroniusSymJSON_ConvertData($hash, $last_yearenergy, $unit_year, $unit_day);
+					my $tmp_yearenergy_dev = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
+					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Current yearenergy value for device $device_id is $tmp_yearenergy_dev $unit_day");
 
-					# $tmp_dayenergy is only required to make a log entry...
-					my $tmp_dayenergy = $dayenergy;
-
-					$dayenergy = $tmp_yearenergy - $last_yearenergy;
-					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $tmp_dayenergy");
+					$dayenergy = $tmp_yearenergy_dev - $tmp_year_begin_dev;
+					FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $energy_day_read_dev");
 				}
 
 				readingsBeginUpdate($hash);
+				if ($avoidDailyBug == 1) {
+					$rv = readingsBulkUpdate($hash, "ENERGY_DAY_READ_".$device_id, $energy_day_read_dev);
+				}
 				$rv = readingsBulkUpdate($hash, "ENERGY_DAY_".$device_id, $dayenergy);
 				$rv = readingsBulkUpdate($hash, "ENERGY_CURRENT_".$device_id, $currentenergy);
 				$rv = readingsBulkUpdate($hash, "ENERGY_TOTAL_".$device_id, $totalenergy);
@@ -451,11 +464,11 @@ sub FroniusSymJSON_ParseHttpResponse($)
 		my $energy_day_read_sum = $dayenergy_sum;
 
 		if ($avoidDailyBug == 1) {
-			my $tmp_day_begin = ReadingsVal($name, "YEAR_SUM_TODAY_START", "0:unknown");
+			my $year_sum_today_start = ReadingsVal($name, "YEAR_SUM_TODAY_START", "0:unknown");
 			my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
 
 			my $tmp_year_begin_sum;
-			my @begin_info = split /:/, $tmp_day_begin;
+			my @begin_info = split /:/, $year_sum_today_start;
 
 			if ($begin_info[1] eq $wday) {
 				$tmp_year_begin_sum = $begin_info[0];
