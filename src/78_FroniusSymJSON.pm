@@ -332,7 +332,9 @@ sub FroniusSymJSON_getInterval($) {
 	return $interval;
 }
 
-
+#
+# Method will be called by the internal time each <interval>
+#
 sub FroniusSymJSON_GetCommonInverterData($) {
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
@@ -426,12 +428,24 @@ sub FroniusSymJSON_GetCommonInverterData_Parse($$$) {
 	$LAST_TIMESTAMP = $json->{'Head'}->{'Timestamp'};
 
 	readingsBeginUpdate($hash);
-	$rv = readingsBulkUpdate($hash, "FAC_CID_".$deviceid, $ENERGY_FAC);
-	$rv = readingsBulkUpdate($hash, "IAC_CID_".$deviceid, $ENERGY_IAC);
-	$rv = readingsBulkUpdate($hash, "IDC_CID_".$deviceid, $ENERGY_IDC);
-	$rv = readingsBulkUpdate($hash, "PAC_CID_".$deviceid, $ENERGY_PAC);
-	$rv = readingsBulkUpdate($hash, "UAC_CID_".$deviceid, $ENERGY_UAC);
-	$rv = readingsBulkUpdate($hash, "UDC_CID_".$deviceid, $ENERGY_UDC);
+	if ($ENERGY_FAC ne "0") {
+		$rv = readingsBulkUpdate($hash, "FAC_CID_".$deviceid, $ENERGY_FAC);
+	}
+	if ($ENERGY_IAC ne "0") {
+		$rv = readingsBulkUpdate($hash, "IAC_CID_".$deviceid, $ENERGY_IAC);
+	}
+	if ($ENERGY_IDC ne "0") {
+		$rv = readingsBulkUpdate($hash, "IDC_CID_".$deviceid, $ENERGY_IDC);
+	}
+	if ($ENERGY_PAC ne "0") {
+		$rv = readingsBulkUpdate($hash, "PAC_CID_".$deviceid, $ENERGY_PAC);
+	}
+	if ($ENERGY_UAC ne "0") {
+		$rv = readingsBulkUpdate($hash, "UAC_CID_".$deviceid, $ENERGY_UAC);
+	}
+	if ($ENERGY_UDC ne "0") {
+		$rv = readingsBulkUpdate($hash, "UDC_CID_".$deviceid, $ENERGY_UDC);
+	}
 	$rv = readingsBulkUpdate($hash, "ErrorCode_CID_".$deviceid, $Device_ErrorCode);
 	$rv = readingsBulkUpdate($hash, "ErrorText_CID_".$deviceid, $Device_ErrorText);
 	$rv = readingsBulkUpdate($hash, "StatusCode_CID_".$deviceid, $Device_StatusCode);
@@ -467,13 +481,40 @@ sub FroniusSymJSON_GetLoggerLEDInfo_Parse($$) {
 	my $name = $hash->{NAME};
 	FroniusSymJSON_Log($hash, 5, "Parse_GetLoggerLEDInfo");                                                         # Eintrag fürs Log
 
+	my $rv = 0;
+
 	my $json = decode_json($data);
 
-	my $device_ids = $attr{$name}{device_ids};
-	if ($device_ids eq "") {
-	  $device_ids = "1";
-	}
+	my $PowerLED = "-";
+	my $SolarNetLED = "-";
+	my $SolarWebLED = "-";
+	my $WLANLED = "-";
+	
+	my $LAST_TIMESTAMP = 0;
 
+	if (defined $json->{'Body'}->{'Data'}->{'PowerLED'}) {
+		$PowerLED = $json->{'Body'}->{'Data'}->{'PowerLED'}->{'Color'}.":".$json->{'Body'}->{'Data'}->{'PowerLED'}->{'State'};
+	}
+	if (defined $json->{'Body'}->{'Data'}->{'SolarNetLED'}) {
+		$SolarNetLED = $json->{'Body'}->{'Data'}->{'SolarNetLED'}->{'Color'}.":".$json->{'Body'}->{'Data'}->{'SolarNetLED'}->{'State'};
+	}
+	if (defined $json->{'Body'}->{'Data'}->{'SolarWebLED'}) {
+		$SolarWebLED = $json->{'Body'}->{'Data'}->{'SolarWebLED'}->{'Color'}.":".$json->{'Body'}->{'Data'}->{'SolarWebLED'}->{'State'};
+	}
+	if (defined $json->{'Body'}->{'Data'}->{'WLANLED'}) {
+		$WLANLED = $json->{'Body'}->{'Data'}->{'WLANLED'}->{'Color'}.":".$json->{'Body'}->{'Data'}->{'WLANLED'}->{'State'};
+	}
+	
+	$LAST_TIMESTAMP = $json->{'Head'}->{'Timestamp'};
+
+	readingsBeginUpdate($hash);
+	$rv = readingsBulkUpdate($hash, "LED_PowerLED", $PowerLED);
+	$rv = readingsBulkUpdate($hash, "LED_SolarNetLED", $SolarNetLED);
+	$rv = readingsBulkUpdate($hash, "LED_SolarWebLED", $SolarWebLED);
+	$rv = readingsBulkUpdate($hash, "LED_WLANLED", $WLANLED);
+	$rv = readingsBulkUpdate($hash, "LED_Timestamp", $LAST_TIMESTAMP);
+	readingsEndUpdate($hash, 1);
+	
 }
 
 sub FroniusSymJSON_GetMinMaxInverterData($) {
