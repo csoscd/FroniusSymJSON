@@ -29,152 +29,23 @@ my $unit_day = "Wh";
 my $unit_year = "Wh";
 my $unit_total = "Wh";
 
+my $request_CommonInverterData = 0;
+my $request_LoggerLEDInfo = 0;
+my $request_MinMaxInverterData = 0;
+my $request_SystemCumulationInverterData = 1;
+
 # FHEM Modulfunktionen
 
-sub ##########################################
-FroniusSymJSON_Log($$$)
+#
+# Helper Function to check if a string begins with a specific suffix
+#
+sub FroniusSymJSON_Begins_With
 {
-   my ( $hash, $loglevel, $text ) = @_;
-   my $xline       = ( caller(0) )[2];
-   
-   my $xsubroutine = ( caller(1) )[3];
-   my $sub         = ( split( ':', $xsubroutine ) )[2];
-   $sub =~ s/FroniusSymJSON_//;
-
-   my $instName = ( ref($hash) eq "HASH" ) ? $hash->{NAME} : $hash;
-   Log3 $hash, $loglevel, "$MODUL $instName: $sub.$xline " . $text;
-}
-
-
-sub FroniusSymJSON_Initialize($) {
-
-    my ($hash) = @_;
-    my $TYPE = "FroniusSymJSON";
-
-    $hash->{DefFn}    = $TYPE . "_Define";
-    $hash->{UndefFn}  = $TYPE . "_Undefine";
-    $hash->{SetFn}    = $TYPE . "_Set";
-    $hash->{GetFn}    = $TYPE . "_Get";
-    $hash->{NotifyFn} = $TYPE . "_Notify";
-
-    $hash->{NOTIFYDEV} = "global";
-
-    $hash->{DbLog_splitFn}= $TYPE . "_DbLog_splitFn";
-#    $hash->{AttrFn}       = $TYPE . "_Attr";
-
-
- $hash->{AttrList} = ""
-    . "device_ids "
-    . "disable:1,0 "
-    . "interval "
-    . "interval_night "
-    . "unit_year:Wh,kWh,MWh,GWh "
-    . "unit_total:Wh,kWh,MWh,GWh "
-    . "unit_day:Wh,kWh,MWh,GWh "
-    . "unit_current:W,kW,MW,GW "
-    . "listdevices:1,0 "
-    . "avoidDailyBug:1,0 "
-#    . "CommonInverterData:1,0 "
-#    . "MinMaxInverterData:1,0 "
-#    . ":1,0 "
-    . $readingFnAttributes
-  ;
-} # end FroniusSymJSON_Initialize
-
-sub FroniusSymJSON_Define($$) {
-
-    my ($hash, $def) = @_;
-    my @args = split("[ \t][ \t]*", $def);
-
-    return "Usage: define <name> FroniusSymJSON <host>" if(@args <2 || @args >3);
-
-    my $name = $args[0];
-    my $type = "FroniusSymJSON";
-    my $interval = 60;
-    my $host = $args[2];
-
-    $hash->{NAME} = $name;
-
-    $hash->{STATE}    = "Initializing" if $interval > 0;
-    $hash->{HOST}     = $host;
-    $hash->{APIURL}   = "http://".$host."/solar_api/GetAPIVersion.cgi";
-    $hash->{helper}{INTERVAL} = $interval;
-    $hash->{MODEL}    = $type;
-    
-  #Clear Everything, remove all timers for this module
-  RemoveInternalTimer($hash);
-  
-  # Get API Version after ten seconds. API Version is important as it also contains the Basis URL
-  # for the API Calls.
-  InternalTimer(gettimeofday() + 10, "FroniusSymJSON_getAPIVersion", $hash, 0);
-
-  #
-  # Init global variables for units from attr
-  # InternalTimer(gettimeofday() + 10, "FroniusSymJSON_InitUnits", $hash, 0);
-
-  #Reset temporary values
-  #$hash->{fhem}{jsonInterpreter} = "";
-
-  $hash->{fhem}{modulVersion} = '$Date: 2018-03-28 08:45:00 +0100 (Thu, 28 Mar 2018) $';
- 
-  return undef;
-} #end FroniusSymJSON_Define
-
-sub FroniusSymJSON_getAPIVersion($) {
-
-	my ($hash) = @_;
-	my $name = $hash->{NAME};
-
-	FroniusSymJSON_Log($hash, 5, "$name: Getting API version and base url from $hash->{APIURL}");
-
-	FroniusSymJSON_PerformHttpRequest($hash, $hash->{APIURL}, "API");
-}
-
-sub FroniusSymJSON_listDevices($) {
-	my ($hash) = @_;
-	my $name = $hash->{NAME};
-	my $rv = "1";
-
-	my $listDevices = $attr{$name}{listdevices};
-	if ($listDevices eq "1") {
-		$rv = "1";
-	} elsif ($listDevices eq "0") {
-		$rv = "0";
+	if (length($_[0]) >= length($_[1])) {
+    	return substr($_[0], 0, length($_[1])) eq $_[1];
+	} else {
+		return 0;
 	}
-	return $rv;
-}
-
-sub FroniusSymJSON_getInterval($) {
-	my ($hash) = @_;
-	my $name = $hash->{NAME};
-	my $is_day = isday();
-
-	my $interval = $attr{$name}{interval};
-	# if there is no interval given, use the internal default
-	if ($interval eq "") {
-		# use default interval if none is given
-		$interval = $hash->{helper}{INTERVAL};
-	}
-	
-	# check if sun has gone. If yes and a night interval is set, use the night interval
-	if ($is_day eq "0") {
-		my $interval_night = $attr{$name}{interval_night};
-		if ($interval_night ne "") {
-			$interval = $interval_night;				
-		}
-	}
-
-	# if interval is less then 5, we will use ten seconds as minimum
-	if ($interval < 5) {
-		# the minimum value
-		$interval = 10;
-		$attr{$name}{interval} = 10;
-	}
-	
-	$hash->{helper}{last_used_interval} = $interval;
-	$hash->{helper}{last_is_day} = $is_day;
-	
-	return $interval;
 }
 
 #
@@ -252,10 +123,412 @@ sub FroniusSymJSON_ConvertData($$$$) {
 }
 
 #
+# Get error text for fronius error code. Only a few are implemented.
+#
+sub FroniusSymJSON_ErrorCodeToText($) {
+	my ( $errorcode ) = @_;
+	my $rv = "unknown";
+	
+	if ($errorcode eq "0") {
+		$rv = "Ok";
+	} elsif ($errorcode eq "306") {
+		$rv = "DC/AC Power Low";
+	} elsif ($errorcode eq "307") {
+		$rv = "DC Voltage Low";
+	}
+	
+	
+	return $rv;
+}
+
+#
+# Get status text from fronius status code.
+# 
+sub FroniusSymJSON_StatusCodeToText($) {
+	my ( $errorcode ) = @_;
+	my $rv = "unknown";
+	
+	if ($errorcode eq "0" || $errorcode eq "1" || $errorcode eq "2" || $errorcode eq "3" || $errorcode eq "4" || $errorcode eq "5" || $errorcode eq "6") {
+		$rv = "Startup";
+	} elsif ($errorcode eq "7") {
+		$rv = "Running";
+	} elsif ($errorcode eq "8") {
+		$rv = "Standby";
+	} elsif ($errorcode eq "9") {
+		$rv = "Bootloading";
+	} elsif ($errorcode eq "10") {
+		$rv = "Error";
+	}
+	
+	
+	return $rv;
+}
+
+#
+# Helper function to extract the device ID from the internal call parameter.
+#
+sub FroniusSymJSON_GetDeviceIdFromCall($) {
+	my ( $call ) = @_;
+	my $rv = "-1";
+	
+	# Just make sure the parameter contains a ":". Only in this
+	# case we have the right param and could extract the device Id.
+	if (index($call, ":") != -1) {
+		my @params = split /:/, $call;
+		$rv = $params[1]
+	}
+	
+	return $rv;
+}
+
+#
+# Help Function to have a standard logging
+#
+sub ##########################################
+FroniusSymJSON_Log($$$)
+{
+   my ( $hash, $loglevel, $text ) = @_;
+   my $xline       = ( caller(0) )[2];
+   
+   my $xsubroutine = ( caller(1) )[3];
+   my $sub         = ( split( ':', $xsubroutine ) )[2];
+   $sub =~ s/FroniusSymJSON_//;
+
+   my $instName = ( ref($hash) eq "HASH" ) ? $hash->{NAME} : $hash;
+   Log3 $hash, $loglevel, "$MODUL $instName: $sub.$xline " . $text;
+}
+
+
+sub FroniusSymJSON_Initialize($) {
+
+    my ($hash) = @_;
+    my $TYPE = "FroniusSymJSON";
+
+    $hash->{DefFn}    = $TYPE . "_Define";
+    $hash->{UndefFn}  = $TYPE . "_Undefine";
+    $hash->{SetFn}    = $TYPE . "_Set";
+    $hash->{GetFn}    = $TYPE . "_Get";
+    $hash->{NotifyFn} = $TYPE . "_Notify";
+
+    $hash->{NOTIFYDEV} = "global";
+
+    $hash->{DbLog_splitFn}= $TYPE . "_DbLog_splitFn";
+#    $hash->{AttrFn}       = $TYPE . "_Attr";
+
+
+ $hash->{AttrList} = ""
+    . "device_ids "
+    . "disable:1,0 "
+    . "interval "
+    . "interval_night "
+    . "unit_year:Wh,kWh,MWh,GWh "
+    . "unit_total:Wh,kWh,MWh,GWh "
+    . "unit_day:Wh,kWh,MWh,GWh "
+    . "unit_current:W,kW,MW,GW "
+    . "listdevices:1,0 "
+    . "avoidDailyBug:1,0 "
+    . "Request_CommonInverterData:1,0 "
+    . "Request_LoggerLEDInfo:1,0 "
+    . "Request_MinMaxInverterData:1,0 "
+    . "Request_SystemCumulationInverterData:1,0 "
+#    . ":1,0 "
+    . $readingFnAttributes
+  ;
+} # end FroniusSymJSON_Initialize
+
+sub FroniusSymJSON_Define($$) {
+
+    my ($hash, $def) = @_;
+    my @args = split("[ \t][ \t]*", $def);
+
+    return "Usage: define <name> FroniusSymJSON <host>" if(@args <2 || @args >3);
+
+    my $name = $args[0];
+    my $type = "FroniusSymJSON";
+    my $interval = 60;
+    my $host = $args[2];
+
+    $hash->{NAME} = $name;
+
+    $hash->{STATE}    = "Initializing" if $interval > 0;
+    $hash->{HOST}     = $host;
+    $hash->{APIURL}   = "http://".$host."/solar_api/GetAPIVersion.cgi";
+    $hash->{helper}{INTERVAL} = $interval;
+    $hash->{MODEL}    = $type;
+    
+  #Clear Everything, remove all timers for this module
+  RemoveInternalTimer($hash);
+  
+  # Get API Version after ten seconds. API Version is important as it also contains the Basis URL
+  # for the API Calls.
+  InternalTimer(gettimeofday() + 10, "FroniusSymJSON_getAPIVersion", $hash, 0);
+
+  #
+  # Init global variables for units from attr
+  # InternalTimer(gettimeofday() + 10, "FroniusSymJSON_InitAttr", $hash, 0);
+
+  #Reset temporary values
+  #$hash->{fhem}{jsonInterpreter} = "";
+
+  $hash->{fhem}{modulVersion} = '$Date: 2018-03-28 08:45:00 +0100 (Thu, 28 Mar 2018) $';
+ 
+  return undef;
+} #end FroniusSymJSON_Define
+
+sub FroniusSymJSON_getAPIVersion($) {
+
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+
+	FroniusSymJSON_Log($hash, 5, "$name: Getting API version and base url from $hash->{APIURL}");
+
+	FroniusSymJSON_PerformHttpRequest($hash, $hash->{APIURL}, "API");
+}
+
+sub FroniusSymJSON_listDevices($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+	my $rv = "1";
+
+	my $listDevices = $attr{$name}{listdevices};
+	if ($listDevices eq "1") {
+		$rv = "1";
+	} elsif ($listDevices eq "0") {
+		$rv = "0";
+	}
+	return $rv;
+}
+
+sub FroniusSymJSON_getInterval($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+	my $is_day = isday();
+
+	my $interval = $attr{$name}{interval};
+	# if there is no interval given, use the internal default
+	if ($interval eq "") {
+		# use default interval if none is given
+		$interval = $hash->{helper}{INTERVAL};
+	}
+	
+	# check if sun has gone. If yes and a night interval is set, use the night interval
+	if ($is_day eq "0") {
+		my $interval_night = $attr{$name}{interval_night};
+		if ($interval_night ne "") {
+			$interval = $interval_night;				
+		}
+	}
+
+	# if interval is less then 5, we will use ten seconds as minimum
+	if ($interval < 5) {
+		# the minimum value
+		$interval = 10;
+		$attr{$name}{interval} = 10;
+	}
+	
+	$hash->{helper}{last_used_interval} = $interval;
+	$hash->{helper}{last_is_day} = $is_day;
+	
+	return $interval;
+}
+
+
+sub FroniusSymJSON_GetCommonInverterData($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+
+	$hash->{STATE}    = "Receiving data";
+	my $interval = FroniusSymJSON_getInterval($hash);
+
+	FroniusSymJSON_Log($hash, 5, "$name: FroniusSymJSON_GetCommonInverterData with scope device, interval: $interval, sunrise: ".sunrise().", isday():".isday());
+
+	if ($hash->{BaseURL} ne "") {
+
+		my $device_ids = $attr{$name}{device_ids};
+		my @devices = split /:/, $device_ids;
+		#
+		# Iterate through all defined device IDs
+		#
+		foreach my $device_id ( @devices ) {
+
+			FroniusSymJSON_Log($hash, 5, "Making GetCommonInverterData http call for DeviceID: $device_id"); 
+
+			FroniusSymJSON_PerformHttpRequest($hash, $hash->{BaseURL}."GetInverterRealtimeData.cgi?Scope=Device&DeviceId=".$device_id."&DataCollection=CommonInverterData", "GetCommonInverterData:".$device_id);
+		}
+
+	} else {
+	   # Error, handling required
+	   # TODO
+	   FroniusSymJSON_Log($hash, 1, "$name: Getting API version and base url from $hash->{APIURL}");
+	}
+
+	# Now add a timer for getting the data
+	InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_GetCommonInverterData", $hash, 0);
+
+}
+
+sub FroniusSymJSON_GetCommonInverterData_Parse($$$) {
+	my ($hash, $data, $call) = @_;
+	my $name = $hash->{NAME};
+
+	my $rv = 0;
+
+	my $json = decode_json($data);
+
+	my $deviceid = FroniusSymJSON_GetDeviceIdFromCall($call);
+
+	FroniusSymJSON_Log($hash, 5, "Processing Parse_GetCommonInverterData for device ".$deviceid);                                                         # Eintrag fürs Log
+	
+	my $ENERGY_FAC = 0;
+	my $ENERGY_IAC = 0;
+	my $ENERGY_IDC = 0;
+	my $ENERGY_PAC = 0;
+	my $ENERGY_UAC = 0;
+	my $ENERGY_UDC = 0;
+	
+	my $LAST_TIMESTAMP = 0;
+	
+	my $Device_ErrorCode = 0;
+	my $Device_ErrorText = "-";
+	my $Device_StatusCode = 0;
+    my $Device_StatusText = "-";
+
+	if (defined $json->{'Body'}->{'Data'}->{'FAC'}->{'Value'}) {
+		$ENERGY_FAC = $json->{'Body'}->{'Data'}->{'FAC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'FAC'}->{'Unit'};
+	}
+	
+	if (defined $json->{'Body'}->{'Data'}->{'IAC'}->{'Value'}) {
+		$ENERGY_IAC = $json->{'Body'}->{'Data'}->{'IAC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'IAC'}->{'Unit'};
+	}
+
+	if (defined $json->{'Body'}->{'Data'}->{'IDC'}->{'Value'}) {
+		$ENERGY_IDC = $json->{'Body'}->{'Data'}->{'IDC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'IDC'}->{'Unit'};
+	}
+
+	if (defined $json->{'Body'}->{'Data'}->{'PAC'}->{'Value'}) {
+		$ENERGY_PAC = $json->{'Body'}->{'Data'}->{'PAC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'PAC'}->{'Unit'};
+	}
+
+	if (defined $json->{'Body'}->{'Data'}->{'UAC'}->{'Value'}) {
+		$ENERGY_UAC = $json->{'Body'}->{'Data'}->{'UAC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'UAC'}->{'Unit'};
+	}
+
+	if (defined $json->{'Body'}->{'Data'}->{'UDC'}->{'Value'}) {
+		$ENERGY_UDC = $json->{'Body'}->{'Data'}->{'UDC'}->{'Value'}." ".$json->{'Body'}->{'Data'}->{'UDC'}->{'Unit'};
+	}
+	
+
+	$Device_ErrorCode = $json->{'Body'}->{'Data'}->{'DeviceStatus'}->{'ErrorCode'};
+	$Device_ErrorText = FroniusSymJSON_ErrorCodeToText($Device_ErrorCode);
+	$Device_StatusCode = $json->{'Body'}->{'Data'}->{'DeviceStatus'}->{'StatusCode'};
+	$Device_StatusText = FroniusSymJSON_StatusCodeToText($Device_StatusCode);
+
+	$LAST_TIMESTAMP = $json->{'Head'}->{'Timestamp'};
+
+	readingsBeginUpdate($hash);
+	$rv = readingsBulkUpdate($hash, "FAC_CID_".$deviceid, $ENERGY_FAC);
+	$rv = readingsBulkUpdate($hash, "IAC_CID_".$deviceid, $ENERGY_IAC);
+	$rv = readingsBulkUpdate($hash, "IDC_CID_".$deviceid, $ENERGY_IDC);
+	$rv = readingsBulkUpdate($hash, "PAC_CID_".$deviceid, $ENERGY_PAC);
+	$rv = readingsBulkUpdate($hash, "UAC_CID_".$deviceid, $ENERGY_UAC);
+	$rv = readingsBulkUpdate($hash, "UDC_CID_".$deviceid, $ENERGY_UDC);
+	$rv = readingsBulkUpdate($hash, "ErrorCode_CID_".$deviceid, $Device_ErrorCode);
+	$rv = readingsBulkUpdate($hash, "ErrorText_CID_".$deviceid, $Device_ErrorText);
+	$rv = readingsBulkUpdate($hash, "StatusCode_CID_".$deviceid, $Device_StatusCode);
+	$rv = readingsBulkUpdate($hash, "StatusText_CID_".$deviceid, $Device_StatusText);
+	$rv = readingsBulkUpdate($hash, "Timestamp_CID_".$deviceid, $LAST_TIMESTAMP);
+	readingsEndUpdate($hash, 1);
+}
+
+sub FroniusSymJSON_GetLoggerLEDInfo($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+
+	$hash->{STATE}    = "Receiving data";
+	my $interval = FroniusSymJSON_getInterval($hash);
+
+	FroniusSymJSON_Log($hash, 5, "$name: FroniusSymJSON_GetLoggerLEDInfo with scope device, interval: $interval, sunrise: ".sunrise().", isday():".isday());
+
+	if ($hash->{BaseURL} ne "") {
+		FroniusSymJSON_Log($hash, 5, "Making GetLoggerLEDInfo http call"); 
+		FroniusSymJSON_PerformHttpRequest($hash, $hash->{BaseURL}."GetLoggerLEDInfo.cgi", "GetLoggerLEDInfo");
+	} else {
+	   # Error, handling required
+	   # TODO
+	   FroniusSymJSON_Log($hash, 1, "$name: Getting API version and base url from $hash->{APIURL}");
+	}
+
+	# Now add a timer for getting the data
+	InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_GetLoggerLEDInfo", $hash, 0);
+}
+
+sub FroniusSymJSON_GetLoggerLEDInfo_Parse($$) {
+	my ($hash, $data) = @_;
+	my $name = $hash->{NAME};
+	FroniusSymJSON_Log($hash, 5, "Parse_GetLoggerLEDInfo");                                                         # Eintrag fürs Log
+
+	my $json = decode_json($data);
+
+	my $device_ids = $attr{$name}{device_ids};
+	if ($device_ids eq "") {
+	  $device_ids = "1";
+	}
+
+}
+
+sub FroniusSymJSON_GetMinMaxInverterData($) {
+	my ($hash) = @_;
+	my $name = $hash->{NAME};
+
+	$hash->{STATE}    = "Receiving data";
+	my $interval = FroniusSymJSON_getInterval($hash);
+
+	FroniusSymJSON_Log($hash, 5, "$name: FroniusSymJSON_GetMinMaxInverterData with scope device, interval: $interval, sunrise: ".sunrise().", isday():".isday());
+
+	if ($hash->{BaseURL} ne "") {
+
+		my $device_ids = $attr{$name}{device_ids};
+		my @devices = split /:/, $device_ids;
+		#
+		# Iterate through all defined device IDs
+		#
+		foreach my $device_id ( @devices ) {
+
+			FroniusSymJSON_Log($hash, 4, "Making GetMinMaxInverterData http call for DeviceID: $device_id"); 
+
+			FroniusSymJSON_PerformHttpRequest($hash, $hash->{BaseURL}."GetInverterRealtimeData.cgi?Scope=Device&DeviceId=".$device_id."&DataCollection=MinMaxInverterData", "GetMinMaxInverterData:".$device_id);
+		}
+
+
+	} else {
+	   # Error, handling required
+	   # TODO
+	   FroniusSymJSON_Log($hash, 1, "$name: Getting API version and base url from $hash->{APIURL}");
+	}
+
+	# Now add a timer for getting the data
+	InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_GetMinMaxInverterData", $hash, 0);
+}
+
+sub FroniusSymJSON_GetMinMaxInverterData_Parse($$$) {
+	my ($hash, $data, $call) = @_;
+	my $name = $hash->{NAME};
+	FroniusSymJSON_Log($hash, 5, "Parse_GetMinMaxInverterData");                                                         # Eintrag fürs Log
+
+	my $json = decode_json($data);
+
+	my $device_ids = $attr{$name}{device_ids};
+	if ($device_ids eq "") {
+	  $device_ids = "1";
+	}
+
+}
+
+#
 # Prepare the http request to the Fronius system to get
 # the Inverter Realtime Data
 #
-sub FroniusSymJSON_getInverterRealtimeData($) {
+sub FroniusSymJSON_GetInverterRealtimeData($) {
 
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
@@ -270,7 +543,7 @@ sub FroniusSymJSON_getInverterRealtimeData($) {
 	   FroniusSymJSON_PerformHttpRequest($hash, $hash->{BaseURL}."GetInverterRealtimeData.cgi?Scope=System", "GetInverterRealtimeData");
 
 	   # Now add a timer for getting the data
-	   InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_getInverterRealtimeData", $hash, 0);
+	   InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_GetInverterRealtimeData", $hash, 0);
 
 	} else {
 	   # Error, handling required
@@ -280,7 +553,7 @@ sub FroniusSymJSON_getInverterRealtimeData($) {
 }
 
 
-sub FroniusSymJSON_Parse_GetInverterRealtimeData($$) {
+sub FroniusSymJSON_GetInverterRealtimeData_Parse($$) {
 	my ($hash, $data) = @_;
 	my $name = $hash->{NAME};
 	FroniusSymJSON_Log($hash, 5, "Parse_GetInverterRealtimeData");                                                         # Eintrag fürs Log
@@ -380,10 +653,10 @@ sub FroniusSymJSON_Parse_GetInverterRealtimeData($$) {
 				# Here the configured unit is the base because the $yearenergy has already been converted
 				# to the $unit_year unit.
 				my $tmp_yearenergy_dev = FroniusSymJSON_ConvertData($hash, $yearenergy, $unit_year, $unit_day);
-				FroniusSymJSON_Log($hash, 5, "Parse_GetInverterRealtimeData: Current yearenergy value for device $device_id is $tmp_yearenergy_dev $unit_day");
+				FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData_Parse: Current yearenergy value for device $device_id is $tmp_yearenergy_dev $unit_day");
 
 				$dayenergy = $tmp_yearenergy_dev - $tmp_year_begin_dev;
-				FroniusSymJSON_Log($hash, 5, "Parse_GetInverterRealtimeData: Avoiding bug, using calculated value of $dayenergy instead of read value of $energy_day_read_dev");
+				FroniusSymJSON_Log($hash, 5, "GetInverterRealtimeData_Parse: Avoiding bug, using calculated value of $dayenergy instead of read value of $energy_day_read_dev");
 			}
 
 			readingsBeginUpdate($hash);
@@ -477,43 +750,73 @@ sub FroniusSymJSON_ParseHttpResponse($)
     if($err ne "")                                                                                                      # wenn ein Fehler bei der HTTP Abfrage aufgetreten ist
     {
         FroniusSymJSON_Log($hash, 1, "error while requesting ".$param->{url}." - $err");                                            # Eintrag fürs Log
-	if ($param->{call} eq "API") {
-	  #
-	  # if API Call failed, try again in 60 seconds
-	  #
-	  InternalTimer(gettimeofday() + 60, "FroniusSymJSON_getAPIVersion", $hash, 0);
-    	  $hash->{STATE}    = "Connection error getting API info";
-          FroniusSymJSON_Log($hash, 1, "API call to DataLogger failed");                                                         # Eintrag fürs Log
-	} elsif ($param->{call} eq "GetInverterRealtimeData") {
-    	  $hash->{STATE}    = "Connection error getting DATA";
-          FroniusSymJSON_Log($hash, 1, "Data call to DataLogger failed");                                                         # Eintrag fürs Log
-	}
+		if ($param->{call} eq "API") {
+		  #
+		  # if API Call failed, try again in 60 seconds
+		  #
+		  InternalTimer(gettimeofday() + 60, "FroniusSymJSON_getAPIVersion", $hash, 0);
+	    	  $hash->{STATE}    = "Connection error getting API info";
+	          FroniusSymJSON_Log($hash, 1, "API call to DataLogger failed");                                                         # Eintrag fürs Log
+		} elsif ($param->{call} eq "GetInverterRealtimeData") {
+	    	  $hash->{STATE}    = "Connection error getting DATA";
+	          FroniusSymJSON_Log($hash, 1, "Data call to DataLogger failed");                                                         # Eintrag fürs Log
+		}
     }
     elsif($data ne "")                                                                                                  # wenn die Abfrage erfolgreich war ($data enthält die Ergebnisdaten des HTTP Aufrufes)
     {
         FroniusSymJSON_Log($hash, 5, "url ".$param->{url}." returned: $data");                                                         # Eintrag fürs Log
 
-	if ($param->{call} eq "API") {
-
-	        FroniusSymJSON_Log($hash, 5, "API was checked");                                                         # Eintrag fürs Log
-
-		my $json = decode_json($data);
+		if ($param->{call} eq "API") {
 	
-		$hash->{APIVersion} = $json->{'APIVersion'};
-		$hash->{BaseURL} = "http://".$hash->{HOST}.$json->{'BaseURL'};
-		$hash->{CompatibilityRange} = $json->{'CompatibilityRange'};
-		
-		$hash->{STATE}    = "Initialised";
-
-		# After the API Request all internal timers could be removed.
-		RemoveInternalTimer($hash);
+		        FroniusSymJSON_Log($hash, 5, "API was checked");                                                         # Eintrag fürs Log
 	
-		# Now add a timer for getting the data
-		InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_getInverterRealtimeData", $hash, 0);
+			my $json = decode_json($data);
 		
-	} elsif ($param->{call} eq "GetInverterRealtimeData") {
-		FroniusSymJSON_Parse_GetInverterRealtimeData($hash, $data);
-	}
+			$hash->{APIVersion} = $json->{'APIVersion'};
+			$hash->{BaseURL} = "http://".$hash->{HOST}.$json->{'BaseURL'};
+			$hash->{CompatibilityRange} = $json->{'CompatibilityRange'};
+			
+			$hash->{STATE}    = "Initialised";
+	
+			# After the API Request all internal timers could be removed.
+			RemoveInternalTimer($hash);
+		
+			if ($request_SystemCumulationInverterData eq "1") {
+				# Now add a timer for getting the data
+				InternalTimer(gettimeofday() + $interval, "FroniusSymJSON_GetInverterRealtimeData", $hash, 0);
+			}
+			if ($request_MinMaxInverterData eq "1") {
+				# Now add a timer for getting the data
+				InternalTimer(gettimeofday() + ($interval + 1), "FroniusSymJSON_GetMinMaxInverterData", $hash, 0);
+			}
+			if ($request_LoggerLEDInfo eq "1") {
+				# Now add a timer for getting the data
+				InternalTimer(gettimeofday() + ($interval + 2), "FroniusSymJSON_GetLoggerLEDInfo", $hash, 0);
+			}
+			if ($request_CommonInverterData eq "1") {
+				# Now add a timer for getting the data
+				InternalTimer(gettimeofday() + ($interval + 3), "FroniusSymJSON_GetCommonInverterData", $hash, 0);
+			}		
+		} elsif ($param->{call} eq "GetInverterRealtimeData") {
+			#
+			# This is scope = system
+			# 
+			FroniusSymJSON_GetInverterRealtimeData_Parse($hash, $data);
+		} elsif (FroniusSymJSON_Begins_With($param->{call}, "GetCommonInverterData")) {
+			#
+			# This is scope = device
+			#
+			FroniusSymJSON_GetCommonInverterData_Parse($hash, $data, $param->{call});
+		} elsif (FroniusSymJSON_Begins_With($param->{call}, "GetMinMaxInverterData")) {
+			#
+			# This is Scope = device
+			#
+			FroniusSymJSON_GetMinMaxInverterData_Parse($hash, $data, $param->{call});
+		} elsif ($param->{call} eq "GetLoggerLEDInfo") {
+			FroniusSymJSON_GetLoggerLEDInfo_Parse($hash, $data);
+		} else {
+			FroniusSymJSON_Log($hash, 1, "Error. Unknown call for ".$param->{call}); 
+		}
     }
     
     # Damit ist die Abfrage zuende.
@@ -575,15 +878,15 @@ sub FroniusSymJSON_Notify($$)
 
 	if($devName eq "global" && grep(m/^INITIALIZED|REREADCFG$/, @{$events}))
 	{
-		 FroniusSymJSON_InitUnits($own_hash);
+		 FroniusSymJSON_InitAttr($own_hash);
 	}
 }
 
-sub FroniusSymJSON_InitUnits($) {
+sub FroniusSymJSON_InitAttr($) {
 	my ($hash) = @_;
 	my $name = $hash->{NAME};
 
-	FroniusSymJSON_Log $hash, 1, "Initialising global units for $name";
+	FroniusSymJSON_Log $hash, 1, "Initialising user setting (attr) for $name";
 	
 	if ($init_done) {
 		if (defined $attr{$name}{unit_day}) {
@@ -610,10 +913,23 @@ sub FroniusSymJSON_InitUnits($) {
 			$unit_year =  "Wh";
 			FroniusSymJSON_Log $hash, 5, "attr unit_year not set, using default";
 		}
-		FroniusSymJSON_Log $hash, 5, "Global units initialised for $name";
+		if (defined $attr{$name}{Request_CommonInverterData}) {
+			$request_CommonInverterData = $attr{$name}{Request_CommonInverterData};
+		}
+		if (defined $attr{$name}{Request_LoggerLEDInfo}) {
+			$request_LoggerLEDInfo = $attr{$name}{Request_LoggerLEDInfo};
+		}
+		if (defined $attr{$name}{Request_MinMaxInverterData}) {
+			$request_MinMaxInverterData = $attr{$name}{Request_MinMaxInverterData};
+		}
+		if (defined $attr{$name}{Request_SystemCumulationInverterData}) {
+			$request_SystemCumulationInverterData = $attr{$name}{Request_SystemCumulationInverterData};
+		}
+		
+		FroniusSymJSON_Log $hash, 5, "User setting (attr) initialised for $name";
 	} else {
 		FroniusSymJSON_Log $hash, 1, "Fhem not ready yet, retry in 5 seconds";
-	  	InternalTimer(gettimeofday() + 5, "FroniusSymJSON_InitUnits", $hash, 0);
+	  	InternalTimer(gettimeofday() + 5, "FroniusSymJSON_InitAttr", $hash, 0);
 	}
 }
 
